@@ -165,6 +165,13 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 			    );
 			    gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPEAT); 
 			}
+			
+			if (mat.alphaTest) {
+				gl.glEnable(GL2.GL_ALPHA_TEST);
+				gl.glAlphaFunc(GL2.GL_GREATER, 0.5f);
+			} else {
+				gl.glDisable(GL2.GL_ALPHA_TEST);
+			}
 			 
 			texture.enable(gl);
 			texture.bind(gl);
