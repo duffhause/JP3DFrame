@@ -12,10 +12,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 
+import com.jogamp.math.Matrix4f;
+import com.jogamp.math.Vec3f;
 import com.jogamp.opengl.GL2;
 import com.jogamp.opengl.GLAutoDrawable;
 import com.jogamp.opengl.GLCapabilities;
-import com.jogamp.opengl.GLContext;
 import com.jogamp.opengl.GLEventListener;
 import com.jogamp.opengl.GLProfile;
 import com.jogamp.opengl.awt.GLCanvas;
@@ -26,13 +27,20 @@ import com.jogamp.opengl.util.texture.Texture;
 import stonerteam.P3D.P3D;
 import stonerteam.P3D.P3DChunk;
 import stonerteam.P3D.Chunks.ColourListChunk;
+import stonerteam.P3D.Chunks.DynaPhysChunk;
 import stonerteam.P3D.Chunks.ImageChunk;
 import stonerteam.P3D.Chunks.ImageDataChunk;
 import stonerteam.P3D.Chunks.IndexListChunk;
+import stonerteam.P3D.Chunks.InstStaticPhysChunk;
+import stonerteam.P3D.Chunks.InstanceListChunk;
 import stonerteam.P3D.Chunks.MeshChunk;
 import stonerteam.P3D.Chunks.NormalListChunk;
 import stonerteam.P3D.Chunks.OldPrimitiveGroupChunk;
 import stonerteam.P3D.Chunks.PositionListChunk;
+import stonerteam.P3D.Chunks.ScenegraphBranchChunk;
+import stonerteam.P3D.Chunks.ScenegraphChunk;
+import stonerteam.P3D.Chunks.ScenegraphDataChunk;
+import stonerteam.P3D.Chunks.ScenegraphTransformChunk;
 import stonerteam.P3D.Chunks.ShaderChunk;
 import stonerteam.P3D.Chunks.StaticEntityChunk;
 import stonerteam.P3D.Chunks.TextureChunk;
@@ -49,6 +57,9 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 	private Map<String, Texture> textureMap;
 	private Map<String, Material> shaderMap;
 	
+	// Caches
+	private List<StaticEntityChunk> staticEntityRenderOrderSorted = new ArrayList<StaticEntityChunk>();
+	
 	public P3DFrame (int sizeX, int sizeY, P3DChunk p3d){
 		if (p3d != null) {
 			this.p3droot = p3d;
@@ -59,6 +70,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		final GLProfile profile = GLProfile.get(GLProfile.GL2);
 		GLCapabilities capabilities = new GLCapabilities(profile);
+		capabilities.setDoubleBuffered(true);
+		capabilities.setDepthBits(24);
 		capabilities.setAlphaBits(8);
 		canvas = new GLCanvas(capabilities);
 		
@@ -128,6 +141,7 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 	
 	private void loadP3d(String filepath) {
 		p3droot = P3D.ReadP3D(filepath);
+		staticEntityRenderOrderSorted.clear();
 		processShaders(p3droot);
 	}
 	
@@ -150,29 +164,27 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		// Apply relevant texture
 		Texture texture = textureMap.get(mat.textureName);
 		
+		if (mat.blendMode == P3D.BLENDMODE_NONE) {
+			gl.glDisable(GL2.GL_BLEND);
+		} else if (mat.blendMode == P3D.BLENDMODE_ALPHA) {
+			gl.glEnable(GL2.GL_BLEND);
+			gl.glBlendFunc(
+		        GL2.GL_SRC_ALPHA,
+		        GL2.GL_ONE_MINUS_SRC_ALPHA
+		    );
+		    gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPEAT); 
+		}
+		
+		if (mat.alphaTest) {
+			gl.glEnable(GL2.GL_ALPHA_TEST);
+			gl.glAlphaFunc(GL2.GL_GREATER, 0.5f);
+		} else {
+			gl.glDisable(GL2.GL_ALPHA_TEST);
+		}
 		
 		if (texture != null) {
 			// Enable textures
-			gl.glEnable(GL2.GL_TEXTURE_2D);
-			
-			if (mat.blendMode == P3D.BLENDMODE_NONE) {
-				gl.glDisable(GL2.GL_BLEND);
-			} else if (mat.blendMode == P3D.BLENDMODE_ALPHA) {
-				gl.glEnable(GL2.GL_BLEND);
-				gl.glBlendFunc(
-			        GL2.GL_SRC_ALPHA,
-			        GL2.GL_ONE_MINUS_SRC_ALPHA
-			    );
-			    gl.glTexEnvi(GL2.GL_TEXTURE_ENV, GL2.GL_TEXTURE_ENV_MODE, GL2.GL_REPEAT); 
-			}
-			
-			if (mat.alphaTest) {
-				gl.glEnable(GL2.GL_ALPHA_TEST);
-				gl.glAlphaFunc(GL2.GL_GREATER, 0.5f);
-			} else {
-				gl.glDisable(GL2.GL_ALPHA_TEST);
-			}
-			 
+			gl.glEnable(GL2.GL_TEXTURE_2D); 
 			texture.enable(gl);
 			texture.bind(gl);
 		} else {
@@ -235,31 +247,109 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		gl.glEnd();
 	}
 	
+	private void drawStaticEntities(GL2 gl, int blmd) {
+		for (StaticEntityChunk se : staticEntityRenderOrderSorted) {
+			for (MeshChunk mesh : se.getChildren(MeshChunk.class)) {
+				for (OldPrimitiveGroupChunk opg : mesh.getChildren(OldPrimitiveGroupChunk.class)) {
+					if (shaderMap.get(opg.ShaderName).blendMode == blmd)
+						drawOldPrimitiveGroup(gl, opg);
+				}
+			}
+		}
+	}
+	
+	private void drawMesh(GL2 gl, MeshChunk mesh) {
+		for (OldPrimitiveGroupChunk opg : mesh.getChildren(OldPrimitiveGroupChunk.class)) {
+			drawOldPrimitiveGroup(gl, opg);
+		}
+	}
+	
+	private MeshChunk meshDotTransformationMatrix(MeshChunk mesh, float[]transformationMatrix4x4) {
+		Matrix4f transformation = new Matrix4f(transformationMatrix4x4);
+		
+		MeshChunk newMesh = (MeshChunk) mesh.copy();
+		for (OldPrimitiveGroupChunk opg : newMesh.getChildren(OldPrimitiveGroupChunk.class)) {
+			PositionListChunk positions = opg.getChildren(PositionListChunk.class).get(0);
+			for (int i=0; i<positions.NumOfVerticies; i++) {
+				Vec3f pos = new Vec3f(
+					positions.Positions[i][0],
+					positions.Positions[i][1],
+					positions.Positions[i][2]
+				);
+				
+				Vec3f newV = transformation.mulVec3f(pos);
+				positions.Positions[i][0] = newV.x();
+				positions.Positions[i][1] = newV.y();
+				positions.Positions[i][2] = newV.z();
+			}
+		}
+	
+		return newMesh;
+		
+	}
+	
+	public void drawInstStaticPhys(GL2 gl) {
+		for (InstStaticPhysChunk isp : p3droot.getChildren(InstStaticPhysChunk.class)) {
+			MeshChunk mesh = isp.getChildren(MeshChunk.class).get(0);
+			
+			InstanceListChunk instanceList = isp.getChildren(InstanceListChunk.class).get(0);
+			ScenegraphChunk scenegraph = instanceList.getChildren(ScenegraphChunk.class).get(0);
+			ScenegraphDataChunk oldScenegraphRoot = scenegraph.getChildren(ScenegraphDataChunk.class).get(0);
+			ScenegraphBranchChunk scenegraphRoot = oldScenegraphRoot.getChildren(ScenegraphBranchChunk.class).get(0);
+			ScenegraphTransformChunk scenegraphTransform = scenegraphRoot.getChildren(ScenegraphTransformChunk.class).get(0);
+			
+			if (scenegraphTransform.Children.size() == 0)
+				continue;
+			
+			for (ScenegraphTransformChunk trans : scenegraphTransform.getChildren(ScenegraphTransformChunk.class)) {			
+				drawMesh(gl, meshDotTransformationMatrix(mesh, trans.transformMatrix4x4));
+			}
+			
+		}
+	}
+	
+	public void drawDynaPhys(GL2 gl) {
+		for (DynaPhysChunk dp : p3droot.getChildren(DynaPhysChunk.class)) {
+			MeshChunk mesh = dp.getChildren(MeshChunk.class).get(0);
+			
+			InstanceListChunk instanceList = dp.getChildren(InstanceListChunk.class).get(0);
+			ScenegraphChunk scenegraph = instanceList.getChildren(ScenegraphChunk.class).get(0);
+			ScenegraphDataChunk oldScenegraphRoot = scenegraph.getChildren(ScenegraphDataChunk.class).get(0);
+			ScenegraphBranchChunk scenegraphRoot = oldScenegraphRoot.getChildren(ScenegraphBranchChunk.class).get(0);
+			ScenegraphTransformChunk scenegraphTransform = scenegraphRoot.getChildren(ScenegraphTransformChunk.class).get(0);
+			
+			if (scenegraphTransform.Children.size() == 0)
+				continue;
+			
+			for (ScenegraphTransformChunk trans : scenegraphTransform.getChildren(ScenegraphTransformChunk.class)) {			
+				drawMesh(gl, meshDotTransformationMatrix(mesh, trans.transformMatrix4x4));
+			}
+			
+		}
+	}
+	
 	public void drawP3d(GL2 gl, int context) {
 		if (context == RENDER_STATIC_ENTITY) {
-			List<StaticEntityChunk> seList = new ArrayList<StaticEntityChunk>();
-			seList.addAll(p3droot.getChildren(StaticEntityChunk.class));
+			if (staticEntityRenderOrderSorted.size() == 0) {
+				staticEntityRenderOrderSorted.addAll(p3droot.getChildren(StaticEntityChunk.class));
 
-			
-			for (int i=0; i<seList.size(); i++) {
-				for (int ii=0; ii<seList.size()-1; ii++) {
-					if (seList.get(ii).RenderOrder > seList.get(ii+1).RenderOrder) {
-						StaticEntityChunk tmp = seList.get(ii);
-						seList.set(ii, seList.get(ii+1));
-						seList.set(ii+1, tmp);
+				//Using bubble sort, better 'rithm should be used later perhaps
+				for (int i=0; i<staticEntityRenderOrderSorted.size(); i++) {
+					for (int ii=0; ii<staticEntityRenderOrderSorted.size()-1; ii++) {
+						if (staticEntityRenderOrderSorted.get(ii).RenderOrder > staticEntityRenderOrderSorted.get(ii+1).RenderOrder) {
+							StaticEntityChunk tmp = staticEntityRenderOrderSorted.get(ii);
+							staticEntityRenderOrderSorted.set(ii, staticEntityRenderOrderSorted.get(ii+1));
+							staticEntityRenderOrderSorted.set(ii+1, tmp);
+						}
 					}
 				}
 			}
 			
-			
-			
-			for (StaticEntityChunk se : seList) {
-				for (MeshChunk mesh : se.getChildren(MeshChunk.class)) {
-					for (OldPrimitiveGroupChunk opg : mesh.getChildren(OldPrimitiveGroupChunk.class)) {
-						drawOldPrimitiveGroup(gl, opg);
-					}
-				}
-			}
+			drawStaticEntities(gl, P3D.BLENDMODE_NONE);
+			drawStaticEntities(gl, P3D.BLENDMODE_ALPHA);
+		} else if (context == RENDER_INST_STATIC_PHYS) {
+			drawInstStaticPhys(gl);
+			drawDynaPhys(gl);
 		}
 	}
 	
@@ -268,8 +358,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		// Files have to be loaded whilst inside of the GL context
 		while (!fileQueue.isEmpty()) {
+			this.dispose(drawable);
 			this.loadP3d(fileQueue.pop());
-			processShaders(p3droot);
 			System.out.println("Loaded P3D");
 		}
 		
@@ -292,7 +382,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		);
 		
 		// Begin drawing p3d objects
-		drawP3d(gl, RENDER_STATIC_ENTITY);		  
+		drawP3d(gl, RENDER_STATIC_ENTITY);	
+		drawP3d(gl, RENDER_INST_STATIC_PHYS);	
 		
 		gl.glFlush(); 	
 	}
@@ -309,16 +400,16 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 
 	@Override
 	public void dispose(GLAutoDrawable drawable) {
-		System.out.println("JOGL Dispose");
-		
+		int texDisposeCount = 0;
 		for (Map.Entry<String, Texture> entry : textureMap.entrySet()) {
-		    String name = entry.getKey();
 		    Texture texture = entry.getValue();
 
 		    if (texture != null) {
 		        texture.destroy(drawable.getGL().getGL2());
+		        texDisposeCount += 1;
 		    }
 		}
+		System.out.println(String.format("Disposed %d textures", texDisposeCount));
 
 		textureMap.clear();
 		shaderMap.clear();
@@ -337,8 +428,6 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		gl.glMatrixMode(GL2.GL_MODELVIEW);
 		gl.glLoadIdentity();
 		
-
-
 	}
 	
 	@Override
@@ -370,4 +459,5 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 	
 	// Constants
 	public final int RENDER_STATIC_ENTITY = 1;
+	public final int RENDER_INST_STATIC_PHYS = 2;
 }

@@ -11,7 +11,6 @@ import java.awt.event.WindowEvent;
 import java.awt.event.WindowListener;
 import java.io.File;
 import java.awt.event.ActionEvent;
-import javax.swing.JPanel;
 
 public class FrameTest {
 	public static void main(String[] args) {
@@ -47,9 +46,6 @@ public class FrameTest {
 		JButton btnLoadPd = new JButton("Load P3D");
 		toolBar.add(btnLoadPd);
 		
-		JPanel panel = new JPanel();
-		frame.getContentPane().add(panel, BorderLayout.CENTER);
-		
 		btnLoadPd.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				JFileChooser jfc = new JFileChooser("D:\\Java");
@@ -58,12 +54,11 @@ public class FrameTest {
 				{
 					File SelectedFile = jfc.getSelectedFile();
 					p3dFrame.requestP3DLoad(SelectedFile.getAbsolutePath());
-					System.out.println("Approved");
 				}
 			}
 		});
 		
-		panel.add(p3dFrame.getCanvas());
+		frame.add(p3dFrame.getCanvas());
 		
 		frame.setVisible(true);
 		
