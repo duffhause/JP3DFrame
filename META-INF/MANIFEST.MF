@@ -1,0 +1,10 @@
+Manifest-Version: 1.0
+Main-Class: stonerteam.JP3DFrame.FrameTest
+Class-Path: .
+Add-Opens: java.desktop/sun.awt java.desktop/sun.java2d
+
+Name: com/jogamp/common/
+Sealed: true
+
+Name: jogamp/common/
+Sealed: true

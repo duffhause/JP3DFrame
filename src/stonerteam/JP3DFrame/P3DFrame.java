@@ -6,6 +6,8 @@ import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -26,6 +28,7 @@ import com.jogamp.opengl.util.texture.Texture;
 
 import stonerteam.P3D.P3D;
 import stonerteam.P3D.P3DChunk;
+import stonerteam.P3D.Chunks.BoundingBoxChunk;
 import stonerteam.P3D.Chunks.ColourListChunk;
 import stonerteam.P3D.Chunks.DynaPhysChunk;
 import stonerteam.P3D.Chunks.ImageChunk;
@@ -53,6 +56,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 	public FPSCamera camera = new FPSCamera();
 	
 	private P3DChunk p3droot = new P3DChunk(new int[] {0x50, 0x33, 0x44, 0xff});
+	private P3DChunk terraroot = new P3DChunk(new int[] {0x50, 0x33, 0x44, 0xff});
+	public String terraPath = null;
 	Stack<String> fileQueue = new Stack<String>();
 	private Map<String, Texture> textureMap;
 	private Map<String, Material> shaderMap;
@@ -120,6 +125,10 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		return p3droot;
 	}
 	
+	public P3DChunk getTERRA() {
+		return terraroot;
+	}
+	
 	public GLCanvas getCanvas() {
 		return this.canvas;
 	}
@@ -139,10 +148,70 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		}
 	}
 	
+	public void loadTerra(String filepath) {
+		terraPath = filepath;
+		terraroot = P3D.ReadP3D(filepath);
+		loadTextures(terraroot);
+	}
+	
 	private void loadP3d(String filepath) {
 		p3droot = P3D.ReadP3D(filepath);
 		staticEntityRenderOrderSorted.clear();
 		processShaders(p3droot);
+		
+		resetCamera();
+	}
+	
+	public void resetCamera() {
+		Vec3f highest = null;
+		Vec3f lowest = null;
+		
+		for (StaticEntityChunk se : p3droot.getChildren(StaticEntityChunk.class)){
+			for (MeshChunk mesh : se.getChildren(MeshChunk.class)){
+				List<BoundingBoxChunk> boundingBoxs = mesh.getChildren(BoundingBoxChunk.class);
+				if (boundingBoxs.size() == 0)
+					continue;
+				BoundingBoxChunk bounds = boundingBoxs.get(0);
+				
+				Vec3f currentHigh = new Vec3f(-bounds.high[0], bounds.high[1],bounds.high[2]);
+				Vec3f currentLow = new Vec3f(-bounds.low[0], bounds.low[1],bounds.low[2]);
+			
+				
+				if (highest == null) {
+			        highest = new Vec3f(currentHigh.x(), currentHigh.y(), currentHigh.z());
+			        lowest = new Vec3f(currentLow.x(), currentLow.y(), currentLow.z());
+			        continue;
+			    }
+				
+				if (currentHigh.x() > highest.x()) {
+				    highest.setX(currentHigh.x());
+				}
+				if (currentHigh.y() > highest.y()) {
+				    highest.setY(currentHigh.y());
+				}
+				if (currentHigh.z() > highest.z()) {
+				    highest.setZ(currentHigh.z());
+				}
+	
+				if (currentLow.x() < lowest.x()) {
+				    lowest.setX(currentLow.x());
+				}
+				if (currentLow.y() < lowest.y()) {
+				    lowest.setY(currentLow.y());
+				}
+				if (currentLow.z() < lowest.z()) {
+				    lowest.setZ(currentLow.z());
+				}
+			}
+
+		}
+		
+		//set camera
+		float x = (highest.x() + lowest.x()) / 2;
+		float y = (highest.y() + lowest.y()) / 2;
+		float z = (highest.z() + lowest.z()) / 2;
+		
+		this.camera.position = new Vec3f(x,y,z);
 	}
 	
 	public void requestP3DLoad(String filepath) {
@@ -193,6 +262,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		gl.glTexParameteri(GL2.GL_TEXTURE_2D, GL2.GL_TEXTURE_WRAP_S, mat.uvMode == P3D.UV_REPEAT ? GL2.GL_REPEAT : GL2.GL_CLAMP);
 		gl.glTexParameteri(GL2.GL_TEXTURE_2D, GL2.GL_TEXTURE_WRAP_T, mat.uvMode == P3D.UV_REPEAT ? GL2.GL_REPEAT : GL2.GL_CLAMP);
+		
+		
 		
 		// Begin drawing polygons
 		if (opg.PrimitiveType == P3D.PRIMITIVE_TRIANGLES) {
@@ -358,8 +429,18 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		// Files have to be loaded whilst inside of the GL context
 		while (!fileQueue.isEmpty()) {
-			this.dispose(drawable);
-			this.loadP3d(fileQueue.pop());
+			
+			String filepath = fileQueue.pop();
+			
+			String filename = Paths.get(filepath).getFileName().toString().toLowerCase();
+			
+			if (filename.endsWith("terra.p3d")) {
+				this.loadTerra(filepath);
+			} else {
+				this.dispose(drawable);
+				this.loadP3d(filepath);
+			}
+
 			System.out.println("Loaded P3D");
 		}
 		
@@ -394,8 +475,8 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		// Resizing the frame will actually dispose the gl frame and create a new one with new dimensions
 			// This means every time the frame is initiated we must reload all the texture data even if p3d file is the same
-	    processShaders(p3droot);
-	    
+		loadTextures(terraroot);
+		processShaders(p3droot); 
 	}
 
 	@Override

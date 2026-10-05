@@ -46,7 +46,22 @@ public class FrameTest {
 		JButton btnLoadPd = new JButton("Load P3D");
 		toolBar.add(btnLoadPd);
 		
+		
 		btnLoadPd.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent arg0) {
+				JFileChooser jfc = new JFileChooser("D:\\Java");
+				int UserChoice = jfc.showOpenDialog(frame);
+				if (UserChoice == JFileChooser.APPROVE_OPTION)
+				{
+					File SelectedFile = jfc.getSelectedFile();
+					p3dFrame.requestP3DLoad(SelectedFile.getAbsolutePath());
+				}
+			}
+		});
+		
+		JButton btnLoadTerra = new JButton("Load TERRA");
+		toolBar.add(btnLoadTerra);
+		btnLoadTerra.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent arg0) {
 				JFileChooser jfc = new JFileChooser("D:\\Java");
 				int UserChoice = jfc.showOpenDialog(frame);
