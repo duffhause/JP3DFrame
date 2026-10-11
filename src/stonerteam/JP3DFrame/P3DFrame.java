@@ -142,9 +142,14 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 	
 	public void loadTextures(P3DChunk p3dchunk) {
 		for (TextureChunk tex : p3dchunk.getChildren(TextureChunk.class)) {
-			ImageChunk img = tex.getChildren(ImageChunk.class).get(0);
-			ImageDataChunk imgData = img.getChildren(ImageDataChunk.class).get(0);
-			textureMap.put(tex.Name, P3DConversion.DataToTexture(imgData.getData()));
+			try {
+				ImageChunk img = tex.getChild(ImageChunk.class);
+				ImageDataChunk imgData = img.getChildren(ImageDataChunk.class).get(0);
+				textureMap.put(tex.Name, P3DConversion.DataToTexture(imgData.getData()));
+			} catch (Exception e){
+				continue;
+			}
+			
 		}
 	}
 	
@@ -168,10 +173,9 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 		
 		for (StaticEntityChunk se : p3droot.getChildren(StaticEntityChunk.class)){
 			for (MeshChunk mesh : se.getChildren(MeshChunk.class)){
-				List<BoundingBoxChunk> boundingBoxs = mesh.getChildren(BoundingBoxChunk.class);
-				if (boundingBoxs.size() == 0)
+				BoundingBoxChunk bounds = mesh.getChild(BoundingBoxChunk.class);
+				if (bounds == null)
 					continue;
-				BoundingBoxChunk bounds = boundingBoxs.get(0);
 				
 				Vec3f currentHigh = new Vec3f(-bounds.high[0], bounds.high[1],bounds.high[2]);
 				Vec3f currentLow = new Vec3f(-bounds.low[0], bounds.low[1],bounds.low[2]);
@@ -183,35 +187,26 @@ public class P3DFrame  implements GLEventListener, KeyListener {
 			        continue;
 			    }
 				
-				if (currentHigh.x() > highest.x()) {
-				    highest.setX(currentHigh.x());
-				}
-				if (currentHigh.y() > highest.y()) {
-				    highest.setY(currentHigh.y());
-				}
-				if (currentHigh.z() > highest.z()) {
-				    highest.setZ(currentHigh.z());
-				}
-	
-				if (currentLow.x() < lowest.x()) {
-				    lowest.setX(currentLow.x());
-				}
-				if (currentLow.y() < lowest.y()) {
-				    lowest.setY(currentLow.y());
-				}
-				if (currentLow.z() < lowest.z()) {
-				    lowest.setZ(currentLow.z());
-				}
+				highest.setX(Math.max(currentHigh.x(), highest.x()));
+				highest.setY(Math.max(currentHigh.y(), highest.y()));
+				highest.setZ(Math.max(currentHigh.z(), highest.z()));
+
+				lowest.setX(Math.min(currentLow.x(), lowest.x()));
+				lowest.setY(Math.min(currentLow.y(), lowest.y()));
+				lowest.setZ(Math.min(currentLow.z(), lowest.z()));
 			}
 
 		}
 		
-		//set camera
-		float x = (highest.x() + lowest.x()) / 2;
-		float y = (highest.y() + lowest.y()) / 2;
-		float z = (highest.z() + lowest.z()) / 2;
+		if (highest != null) {
+			//set camera
+			float x = (highest.x() + lowest.x()) / 2;
+			float y = (highest.y() + lowest.y()) / 2;
+			float z = (highest.z() + lowest.z()) / 2;
+			
+			this.camera.position = new Vec3f(x,y,z);
+		}
 		
-		this.camera.position = new Vec3f(x,y,z);
 	}
 	
 	public void requestP3DLoad(String filepath) {
